@@ -1,0 +1,67 @@
+trainer:
+  train_batches: 100000
+  val_batches: 400
+  val_only: false
+  log_interval: 50
+  val_interval: 1000
+  out_dir: runs
+  init_from: scratch
+  compile: true
+  # Run output lands in <out_dir>/<notes>/; override on CLI with trainer.notes=<label>
+  notes: experiment
+
+  # Logging
+  log_to_file: false
+  log_to_wandb: false
+  wandb_project: "llm-looping"
+
+  # Save checkpoint after latest validation step
+  save_last_checkpoint: true
+  # Save checkpoint after validation step with lowest loss
+  save_best_checkpoint: true
+  # Keep all checkpoints
+  always_save_checkpoint: false
+  # Save a recovery checkpoint every N steps (-1 disables)
+  save_recovery_checkpoint: -1
+  # Always keep checkpoints at these training steps (must be multiples of val_interval)
+  keep_checkpoint_steps: []
+
+  # Garbage-collect every N steps (-1 disables)
+  garbage_collect: -1
+  # Use the fused-linear-cross-entropy kernel (liger)
+  use_fused_kernels: false
+
+data:
+  dataset: loop_stargraph
+  effective_batch_size: 64
+  gradient_accum_steps: 8
+  num_workers: 0
+  # Required: set on CLI to a .txt file produced by data/loop_stargraph/prepare.py
+  loop_stargraph_data_path: ""
+  loop_stargraph_max_nodes: 30
+
+model:
+  n_layer: 12
+  n_head: 8
+  n_embd: 768
+  expansion_factor: 4
+  dropout: 0.0
+  bias: false
+  vocab_size: 0 #will be overwritten by datamodule
+  block_size: 1024
+  context_length: 0
+  gpt_mode: next_token
+  loss_on_response_only: true
+
+optimizer:
+  learning_rate: 0.0001
+  weight_decay: 0.0
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: null
+
+lr_scheduler:
+  decay_lr: true
+  warmup_iters: 1
+  lr_decay_iters: 100000
+  min_lr: 0.000001
