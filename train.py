@@ -18,6 +18,7 @@ import wandb
 import yaml
 import lightning as L
 from argparse import ArgumentParser
+from dataclasses import asdict
 from omegaconf import OmegaConf, DictConfig
 from lightning.fabric.strategies.model_parallel import ModelParallelStrategy
 from lightning.fabric.loggers import CSVLogger
@@ -156,15 +157,17 @@ def do_train(
         os.makedirs(experiment_out_dir, exist_ok=True)
     fabric.print(f"Output directory: {experiment_out_dir}")
 
-    # dump config to out_dir
+    # Create model and trainer
+    model = initialize_model(fabric, config, tokenizer, initialize_optimizer=True)
+    # Record the configuration actually consumed by the model, as well as the
+    # outer training configuration. This exposes any omitted model settings.
+    config.effective_model_config = OmegaConf.create(asdict(model.config))
+    if model.config.pad_token_id != tokenizer.pad_token_id:
+        raise ValueError("Model and tokenizer padding IDs do not match")
     if fabric.global_rank == 0:
         OmegaConf.save(
             config, os.path.join(experiment_out_dir, "materialized_config.yaml")
         )
-    # (wandb login already occurred before WandbLogger creation)
-
-    # Create model and trainer
-    model = initialize_model(fabric, config, tokenizer, initialize_optimizer=True)
     trainer = Trainer(
         fabric=fabric,
         config=config,

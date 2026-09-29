@@ -8,6 +8,7 @@ import torch
 import wandb
 import lightning as L
 from datetime import datetime
+from dataclasses import asdict
 from lightning.fabric.strategies.model_parallel import ModelParallelStrategy
 from torch.distributed.fsdp import fully_shard
 from torch.utils.data import DataLoader
@@ -34,6 +35,12 @@ def initialize_model(
         config.model.gpt_mode in gpt_modes
     ), f"GPT mode must be one of {gpt_modes}"
 
+    pad_token_id = tokenizer.pad_token_id
+    if not 0 <= pad_token_id < config.model.vocab_size:
+        raise ValueError("Tokenizer padding ID must be inside the model vocabulary")
+    if pad_token_id == tokenizer.eos_token_id:
+        raise ValueError("Padding and EOS must use distinct token IDs")
+
     # start with model_args from command line
     model_args = dict(
         n_layer=config.model.n_layer,
@@ -44,6 +51,8 @@ def initialize_model(
         vocab_size=config.model.vocab_size,
         dropout=config.model.dropout,
         eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=pad_token_id,
+        loss_on_response_only=config.model.loss_on_response_only,
         use_fused=config.trainer.use_fused_kernels,
     )
 
@@ -58,6 +67,7 @@ def initialize_model(
         "is_fim_mode": config.model.gpt_mode == "fim",
     }
     model_config = ModelConfigClass(**model_args)
+    fabric.print(f"Effective GPTConfig: {asdict(model_config)}")
 
     # Load a checkpoint file
     if checkpoint_path:

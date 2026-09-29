@@ -105,11 +105,14 @@ class CausalSelfAttention(nn.Module):
         if rope is not None:
             q, k = RotaryPositionEmbedding.apply(q, k, rope)
 
+        if mask is not None:
+            # Broadcast the same per-example mask across all attention heads
+            # in both the SDPA and manual implementations.
+            mask = mask.view(B, 1, T, T)
+
         # causal self-attention; Self-attend: (B, Nh, T, Dh) x (B, Nh, Dh, T) -> (B, Nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            if mask is not None:
-                mask = mask.view(B, 1, T, T)
             y = torch.nn.functional.scaled_dot_product_attention(
                 query=q,
                 key=k,
@@ -276,10 +279,15 @@ class Transformer(DocumentRelativePositions, FusedCrossEntropyLoss, nn.Module):
             mask = self.create_attention_mask(batch)
         # mask out padding tokens so they are not attended to
         pad_id = getattr(self.config, 'pad_token_id', None)
-        if pad_id is not None:
+        if pad_id is not None and pad_id >= 0:
             pad_mask = batch != pad_id  # (B, T)
-            # expand to (B, T, T) and combine
+            # Real queries can only attend to real keys. Give each padding
+            # query its own diagonal entry to avoid an all-masked softmax row
+            # (and NaNs in the manual attention path). Padding outputs are
+            # excluded from the loss and cannot affect real-token outputs.
             mask = mask & pad_mask.unsqueeze(1) & pad_mask.unsqueeze(2)
+            diagonal = torch.eye(seq_len, dtype=torch.bool, device=batch.device)
+            mask = mask | (~pad_mask.unsqueeze(2) & diagonal.unsqueeze(0))
 
         # token embeddings of shape (b, t, n_embd)
         x = self.token_embedding(batch)
@@ -366,7 +374,9 @@ class GPT(ModelBase):
         # mask padding tokens in the loss targets
         pad_id = getattr(self.config, 'pad_token_id', None)
         if pad_id is not None and pad_id >= 0:
-            targets = targets.masked_fill(targets == pad_id, -100)
+            targets = targets.masked_fill(
+                (targets == pad_id) | (inputs == pad_id), -100
+            )
 
         if self.config.is_fim_mode:
             # Create FIM loss mask
@@ -819,6 +829,12 @@ class GPT(ModelBase):
         last_prompt_index = (prompt_len - 1).unsqueeze(1)
         prompt_mask = target_indices.expand(batch_size, -1) < last_prompt_index
         targets = targets.masked_fill(prompt_mask, -100)
+
+        pad_id = self.config.pad_token_id
+        if pad_id is not None and pad_id >= 0:
+            targets = targets.masked_fill(
+                (targets == pad_id) | (inputs == pad_id), -100
+            )
 
         # Forward pass
         logits = self.model(inputs)
