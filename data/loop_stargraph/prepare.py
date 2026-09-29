@@ -30,6 +30,7 @@ Filenames produced:
 
 import argparse
 import os
+import random
 import sys
 
 # `data/loop_stargraph.py` provides Tokenizer and shadows this directory as a
@@ -83,6 +84,8 @@ def _build_filename(args) -> str:
 
 
 def generate_and_save(args) -> int:
+    if getattr(args, "seed", None) is not None:
+        random.seed(args.seed)
     os.makedirs(args.data_dir, exist_ok=True)
     tokenizer = Tokenizer(args.max_nodes)
     save_path = os.path.join(args.data_dir, _build_filename(args))
@@ -123,7 +126,7 @@ def generate_and_save(args) -> int:
                 actual_max_tokens = count
             out.write(line + "\n")
 
-            if show_loading_bar:
+            if show_loading_bar and ((i + 1) % max(1, args.num_samples // 1000) == 0 or i + 1 == args.num_samples):
                 done = int((i + 1) * 50 / args.num_samples)
                 bar = "█" * done + " " * (50 - done)
                 print(f"\r|{bar}| {(i + 1) * 100 / args.num_samples:.1f}%", end="", flush=True)
@@ -144,6 +147,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_nodes", type=int, default=30)
     parser.add_argument("--max_tokens", type=int, default=200)
     parser.add_argument("--data_dir", type=str, default="data/loop_stargraph")
+    parser.add_argument("--seed", type=int, default=None, help="Optional random seed for reproducible data generation.")
     parser.add_argument("--looping_data_frac", type=float, default=0.0,
                         help="Appendix F bias: probability of replacing the sample with a deterministic looping trace.")
 

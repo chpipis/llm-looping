@@ -659,6 +659,7 @@ def main():
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p (nucleus) sampling threshold (1.0 disables)")
     parser.add_argument("--max_lines", type=int, default=None, help="Max lines to process from data file")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for generation")
+    parser.add_argument("--seed", type=int, default=None, help="Optional seed for reproducible sampling")
     parser.add_argument("--save_file", type=str, default=None,
                         help="Single-run mode: path to JSON for the summary (+ examples if --save_examples)")
     parser.add_argument("--logit_probs_k", type=int, default=None,
@@ -725,6 +726,8 @@ def main():
     config.trainer.compile = False
 
     fabric = L.Fabric(devices=1)
+    if args.seed is not None:
+        fabric.seed_everything(args.seed)
 
     eval_data_path, data_params = resolve_eval_data_path(args.data_path, args.validation_samples)
 
