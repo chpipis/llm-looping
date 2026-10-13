@@ -18,6 +18,13 @@ mechanisms behind low-temperature looping:
 They also measure how a small amount of explicitly looping training data can
 amplify both effects.
 
+**Correction to the previous version.** We thank Taehyun Kim for bringing a
+padding issue to our attention: the padding token ID was not passed to the
+model, leaving padding unmasked during training. We reran the affected
+experiments and revised some observations, including reset-probability
+overestimation and catalyst strength in the correlated-errors setting; the
+main synthetic conclusions remain unchanged.
+
 This repository builds on the
 [Belief State Transformer codebase](https://github.com/microsoft/BST),
 which is based on [nanoGPT](https://github.com/karpathy/nanoGPT).
@@ -46,7 +53,8 @@ python data/loop_stargraph/prepare.py \
     --max_nodes 30 \
     --max_tokens 200 \
     --reset_probability 0.3 \
-    --exploration_probability 0.2
+    --exploration_probability 0.2 \
+    --seed 1337
 ```
 
 ### 2. Train
@@ -75,17 +83,24 @@ RUN_DIR=/absolute/path/printed/by/train.py
 
 ### 3. Evaluate
 
+For the paper's seeded evaluation set, first rerun the data-generation
+command above with `--num_samples 4000 --seed 1338`.
+
 ```bash
 CUDA_VISIBLE_DEVICES=0 python run_loop_stargraph_validation.py \
     --latest_ckpt_file "${RUN_DIR}/latest_ckpt" \
     --data_path "${DATA_FILE}" \
     --max_total_tokens 200 \
     --temperature 0.0,0.2,0.4,0.6,0.8,1.0 \
-    --validation_samples 4000
+    --validation_samples 4000 \
+    --seed 1339
 ```
 
 If the matching 4,000-example validation file does not exist, the evaluator
-generates it automatically. Evaluation reports:
+generates it automatically without a fixed data-generation seed.
+`--latest_ckpt_file` locates the run directory; evaluation selects its
+lowest-validation-loss checkpoint, not necessarily the latest one.
+Evaluation reports:
 
 - accuracy;
 - average response length;
@@ -102,7 +117,8 @@ python plotting/plot_validation_curves.py \
 ```
 
 This writes `accuracy.pdf`, `looping_count.pdf`,
-`avg_response_length.pdf`, and the joined metrics CSV.
+`avg_response_length.pdf`, and the joined metrics CSV. Repeat `--run DIR LABEL`
+to overlay the variants in the table below.
 
 ## Paper experiment settings
 
@@ -120,21 +136,29 @@ entry points. Unless overridden below, they use these shared settings:
 | Default model | 12 layers, 8 heads, embedding dimension 768 |
 | Optimizer | AdamW, learning rate `1e-4`, weight decay `0` |
 
-Change the following settings to reproduce the main variants:
+Figure numbers below refer to the revised paper. Change the following
+settings from the quick start:
 
-| Experiment | Graph | Walk/data settings | Training overrides |
+| Figures | Experiment | Graph and data settings | Training overrides |
 |---|---|---|---|
-| Hardness-driven looping | G(5,5), G(5,3) | `random_walk_with_reset`; reset `0.3`; exploration `0` or `0.2` | — |
-| Temporally correlated errors | G(5,5) | `pure_random_walk`; margin `0`, `0.05`, or `0.1` | — |
-| Explicit looping bias | Same as the corresponding base experiment | Add `--looping_data_frac 0.001` to either walk type | — |
-| Hardness plus correlated errors | G(5,5) | `pure_random_walk`; margin `0`; correct-arm probability `0.5`; all four wrong arms available | — |
-| Hardness plus correlated errors | G(10,5) | `pure_random_walk`; margin `0`; correct-arm probability `0.5`; four sampled wrong arms; `max_nodes=50`; `max_tokens=250` | 4M examples; 300K training and LR-decay steps; evaluate with `--max_total_tokens 250` |
-| Model-capacity experiments | G(5,3) | `random_walk_with_reset`; reset `0.3`; no exploration; `max_nodes=50` | 1, 2, and 12 layers |
+| 3 | Hardness-driven looping | G(5,5), G(5,3); `random_walk_with_reset`; reset `0.3`; exploration `0` or `0.2` | — |
+| 4 | Temporally correlated errors | G(5,5); `pure_random_walk`; `--margin 0` or `0.1` | — |
+| 5, 17, 18 | Catalyst: hardness-driven looping | G(5,5); same reset/exploration settings as Fig. 3; `--looping_data_frac 0` vs `0.001` (0.1%) | — |
+| 19, 20 | Catalyst: correlated errors | G(5,5); `pure_random_walk`; `--margin 0`; `--looping_data_frac 0` vs `0.01` (1%) | — |
+| 15 | Hardness plus correlated errors | G(10,5); `pure_random_walk`; `--margin 0`; `--correct_arm_probability 0.5`; `--num_wrong_arms_explored 4`; `--max_nodes 50`; `--max_tokens 250` | 4M examples; 300K training and LR-decay steps; evaluate with `--max_total_tokens 250` |
+| 21, 22 | Model capacity and reset overestimation | G(5,3); `random_walk_with_reset`; reset `0.3`; no exploration; `--max_nodes 50` | `model.n_layer=1`, `2`, or `12` |
+
+Figures 3, 4, 15, 18, 20, and 21 show temperature sweeps using
+`plotting/plot_validation_curves.py`. Figures 5, 17, and 19 show greedy
+root-transition probabilities (instructions below); Fig. 5 repeats Fig. 17(a).
+Figure 22 uses the reset statistics described below.
 
 **Configuration note.** Keep coupled settings consistent:
 
 - When generating data with `--max_nodes 50`, also pass
   `data.loop_stargraph_max_nodes=50` to `train.py`.
+  Total model vocabulary sizes are 36 and 56 for 30 and 50 node labels,
+  respectively, including special/reserved tokens.
 - When changing the number of training steps, set both
   `trainer.train_batches` and `lr_scheduler.lr_decay_iters`.
 - Set evaluation's `--max_total_tokens` to the `--max_tokens` value used for
@@ -153,6 +177,12 @@ python train.py \
     lr_scheduler.lr_decay_iters=100000
 ```
 
+**Evaluation comparisons.** Training uses seed `1337`; generate held-out
+data separately with seed `1338` and evaluate with `--seed 1339`.
+For each baseline/bias pair, pass the same unbiased 4,000-example file as
+`--data_path` to both evaluations, rather than each model's training file.
+This keeps the held-out prompts identical across the comparison.
+
 ## Data-generation options
 
 `data/loop_stargraph/prepare.py` supports:
@@ -169,11 +199,16 @@ python train.py \
 | `--correct_arm_probability` | Fixed probability assigned to the correct arm |
 | `--num_wrong_arms_explored` | Number of wrong arms with nonzero probability |
 | `--looping_data_frac` | Fraction of examples replaced by deterministic looping traces |
+| `--seed` | Random seed for data generation |
 
 ## Root-transition probability plots
 
-Evaluate both a baseline and bias-trained run with `--save_examples` and
-`--logit_probs_k 5`, then run:
+Evaluate both runs on the shared held-out file, adding
+`--save_examples --logit_probs_k 36` to the evaluation command above. Use
+`56` instead of `36` when `max_nodes=50`: saving the full vocabulary avoids
+silently omitting root visits whose target token falls outside the top five.
+Keep all 4,000 example records (do not set `--max_valid_saved`). The plots
+use the temperature-0 export:
 
 ```bash
 BASE_RUN_DIR=/path/to/baseline/run
@@ -184,12 +219,16 @@ python plotting/plot_root_visit_probs.py \
     --bias "${BIAS_RUN_DIR}" \
     --target-strategy source \
     --temperature 0.0 \
-    --base-label "G(5,5)" \
-    --bias-label "G(5,5) w/bias" \
+    --base-label "0% bias" \
+    --bias-label "0.1% bias" \
     --out plots/reset_probability_overlay.pdf
 ```
 
-Use `--target-strategy most_visited_child` for `pure_random_walk`.
+For Fig. 19, use `--target-strategy most_visited_child`, the zero-margin
+models, and `--bias-label "1% bias"`. The target is each trace's most visited
+root child. The plots omit terminal EOS decisions; their thick curves average
+only traces reaching each visit index and are shown while at least 5% of
+usable traces contribute (`--avg-min-trace-frac 0.05`).
 
 ## Repository layout
 
